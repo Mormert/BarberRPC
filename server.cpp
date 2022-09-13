@@ -3,10 +3,6 @@
 #include <iostream>
 #include "rpc/server.h"
 
-void foo() {
-    std::cout << "foo was called!" << std::endl;
-}
-
 int main(int argc, char *argv[]) {
     const uint16_t port = 8080;
     rpc::server srv(port);
