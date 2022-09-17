@@ -7,6 +7,7 @@
 #include <array>
 #include <semaphore>
 #include <random>
+#include <queue>
 #include "blockingconcurrentqueue.h"
 #include "rpc/server.h"
 
@@ -31,7 +32,8 @@ public:
 
     void SetupRPCs(rpc::server &server) {
         server.bind("enter_barbershop", [&]() -> EnterBarbershopInfo {
-            if (mClientQueueSize > mWaitingChairs) {
+            std::lock_guard<std::mutex> lockGuard{mClientQueueStlMtx};
+            if (mClientQueue.size() > mWaitingChairs) {
                 return EnterBarbershopInfo{-1, BarbershopStatus_FULL};
             } else {
                 return EnterBarbershopInfo{static_cast<Client>(mClientIncrementor++), BarbershopStatus_AVAILABLE};
@@ -39,8 +41,9 @@ public:
         });
 
         server.bind("serve_me", [&](Client client) -> HaircutCost {
-            mClientQueueSize++;
-            mClientQueue.enqueue(client);
+            mClientQueueStlMtx.lock();
+            mClientQueue.push(client);
+            mClientQueueStlMtx.unlock();
 
             // Wait until the client has been served
             sBinarySemaphores.at(client % 3).acquire();
@@ -55,9 +58,17 @@ public:
     [[noreturn]] void ServeOrSleep() {
         while (true) {
             // Waits forever until there is some client waiting to be served (aka "sleep")
-            Client c;
-            mClientQueue.wait_dequeue(c);
-            mClientQueueSize--;
+
+
+            mClientQueueStlMtx.lock();
+            if(mClientQueue.empty())
+            {
+                mClientQueueStlMtx.unlock();
+                continue;
+            }
+            Client c = mClientQueue.front();
+            mClientQueue.pop();
+            mClientQueueStlMtx.unlock();
             std::cout << "Serving client " << c << ": ";
             for (int i = 0; i < mClientServeTimeSeconds; i++) {
                 std::this_thread::sleep_for(1s);
@@ -75,8 +86,8 @@ private:
     const static inline int mWaitingChairs{3};
     const static inline int mClientServeTimeSeconds{15};
 
-    moodycamel::BlockingConcurrentQueue<Client> mClientQueue;
-    std::atomic<int32_t> mClientQueueSize{0};
+    std::queue<Client> mClientQueue;
+    std::mutex mClientQueueStlMtx;
 
     // This array of binary semaphores is used to signal the "serve_me" from the
     // ServeOrSleep function to continue the execution in "serve_me"
