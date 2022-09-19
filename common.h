@@ -5,10 +5,10 @@
 #include <thread>
 #include <iostream>
 #include <array>
-#include <semaphore>
 #include <random>
 #include <queue>
 #include "blockingconcurrentqueue.h"
+#include "lightweightsemaphore.h"
 #include "rpc/server.h"
 
 using namespace std::chrono_literals;
@@ -46,7 +46,7 @@ public:
             mClientQueueStlMtx.unlock();
 
             // Wait until the client has been served
-            sBinarySemaphores.at(client % 3).acquire();
+            semaphores.at(client % 3).wait();
 
             std::random_device dev;
             std::mt19937 rng(dev());
@@ -73,9 +73,11 @@ public:
             for (int i = 0; i < mClientServeTimeSeconds; i++) {
                 std::this_thread::sleep_for(1s);
                 std::cout << i << ' ';
+                std::cout << std::flush;
             }
             std::cout << "... finished!" << std::endl;
-            sBinarySemaphores.at(c % 3).release();
+
+            semaphores.at(c % 3).signal();
         }
     }
 
@@ -91,9 +93,10 @@ private:
 
     // This array of binary semaphores is used to signal the "serve_me" from the
     // ServeOrSleep function to continue the execution in "serve_me"
-    std::array<std::binary_semaphore, 3> sBinarySemaphores = {std::binary_semaphore{0},
-                                                              std::binary_semaphore{0},
-                                                              std::binary_semaphore{0}};
+    std::array<moodycamel::LightweightSemaphore, 3> semaphores = {
+            moodycamel::LightweightSemaphore{0,1},
+            moodycamel::LightweightSemaphore{0,1},
+            moodycamel::LightweightSemaphore{0,1}};
 
 };
 
